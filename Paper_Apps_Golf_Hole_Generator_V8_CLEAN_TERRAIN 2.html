@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Paper Apps Golf — Hole Generator</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#eef0ea;color:#252a25;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1050px;margin:auto;padding:16px}
+h1{margin:0 0 4px;font-size:1.5rem}
+.sub{font-size:.82rem;color:#626a61;margin-bottom:12px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+button,select{font:inherit;border:1px solid #899287;border-radius:8px;background:#fff;padding:8px 10px}
+button{cursor:pointer}
+button.primary{background:#27352a;color:#fff;border-color:#27352a}
+.board{background:#fff;border:1px solid #c4c9c1;border-radius:10px;padding:10px;overflow:auto}
+svg{display:block;width:min(100%,760px);height:auto;margin:auto}
+.status{margin-top:9px;font-size:.82rem;color:#596158}
+#courseSummary{font-weight:600}
+@media print{
+ body{background:#fff}
+ .wrap{max-width:none;padding:0}
+ .controls,.sub,.status,#courseSummary,h1{display:none}
+ .board{border:0;padding:0}
+ svg{width:100%;max-width:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="title">Paper Apps Golf — Hole 1</h1>
+<div class="sub">20 × 25 grid • white rough • green fairway landing zones • hazards and trees stay on the grid</div>
+
+<div class="controls">
+  <label>Difficulty <select id="difficulty"><option>Easy</option><option selected>Medium</option><option>Hard</option><option>Brutal</option></select></label>
+  <label>Fairway <select id="fairway"><option>Rare</option><option selected>Normal</option><option>Generous</option></select></label>
+  <label>Water <select id="water"><option>None</option><option selected>Some</option><option>Lots</option></select></label>
+  <label>Sand <select id="sand"><option>None</option><option selected>Some</option><option>Lots</option></select></label>
+  <label>Trees <select id="trees"><option>Few</option><option selected>Normal</option><option>Lots</option></select></label>
+  <label>Hazard pressure <select id="pressure"><option>Low</option><option selected>Medium</option><option>High</option></select></label>
+  <label>Special <select id="special"><option selected>Random</option><option>None</option><option>Island</option><option>Almost Island</option><option>Forest Gate</option><option>Forest Tunnel</option><option>Mixed Enclosure</option></select></label>
+</div>
+
+<div class="controls">
+  <button class="primary" onclick="newHole()">🎲 New Hole</button>
+  <button onclick="newCourse(9)">🎲 New 9 Holes</button>
+  <button onclick="newCourse(18)">🎲 New 18 Holes</button>
+  <button onclick="previousHole()">◀ Previous</button>
+  <button onclick="nextHole()">Next ▶</button>
+  <button onclick="window.print()">🖨️ Print Current Hole</button>
+</div>
+
+<div class="board"><svg id="svg" viewBox="0 0 820 1010" aria-label="Paper Apps Golf hole"></svg></div>
+<div class="status" id="status"></div>
+<div class="status" id="courseSummary"></div>
+</div>
+
+<script>
+'use strict';
+
+const COLS=20, ROWS=25, CELL=40, PAD=10;
+const W=COLS*CELL+PAD*2, H=ROWS*CELL+PAD*2;
+let currentCourse=[], currentHole=1, currentCourseType=0;
+
+function rand(a=0,b=1){return a+Math.random()*(b-a)}
+function ri(a,b){return Math.floor(rand(a,b+1))}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function choice(a){return a[ri(0,a.length-1)]}
+
+function clearSVG(){
+  const s=document.getElementById('svg');
+  s.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  s.innerHTML='';
+  const bg=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  bg.setAttribute('x',0);bg.setAttribute('y',0);bg.setAttribute('width',W);bg.setAttribute('height',H);
+  bg.setAttribute('fill','#fff');s.appendChild(bg);
+
+  for(let x=0;x<=COLS;x++){
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',PAD+x*CELL);l.setAttribute('y1',PAD);
+    l.setAttribute('x2',PAD+x*CELL);l.setAttribute('y2',PAD+ROWS*CELL);
+    l.setAttribute('stroke','#b9c0b7');l.setAttribute('stroke-width','1');
+    s.appendChild(l);
+  }
+  for(let y=0;y<=ROWS;y++){
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',PAD);l.setAttribute('y1',PAD+y*CELL);
+    l.setAttribute('x2',PAD+COLS*CELL);l.setAttribute('y2',PAD+y*CELL);
+    l.setAttribute('stroke','#b9c0b7');l.setAttribute('stroke-width','1');
+    s.appendChild(l);
+  }
+}
+function rect(x,y,fill,stroke='none',sw=0){
+  const e=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  e.setAttribute('x',PAD+x*CELL);e.setAttribute('y',PAD+y*CELL);
+  e.setAttribute('width',CELL);e.setAttribute('height',CELL);
+  e.setAttribute('fill',fill);e.setAttribute('stroke',stroke);e.setAttribute('stroke-width',sw);
+  document.getElementById('svg').appendChild(e);
+}
+function circleCell(x,y,r,stroke,fill='none',sw=2){
+  const e=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  e.setAttribute('cx',PAD+x*CELL+CELL/2);e.setAttribute('cy',PAD+y*CELL+CELL/2);
+  e.setAttribute('r',r);e.setAttribute('fill',fill);e.setAttribute('stroke',stroke);e.setAttribute('stroke-width',sw);
+  document.getElementById('svg').appendChild(e);
+}
+function text(x,y,t,size=18,weight='600'){
+  const e=document.createElementNS('http://www.w3.org/2000/svg','text');
+  e.setAttribute('x',PAD+x*CELL+CELL/2);e.setAttribute('y',PAD+y*CELL+CELL/2+size*.35);
+  e.setAttribute('text-anchor','middle');e.setAttribute('font-size',size);e.setAttribute('font-weight',weight);
+  e.setAttribute('fill','#263027');e.textContent=t;document.getElementById('svg').appendChild(e);
+}
+function cellKey(c){return c.x+','+c.y}
+function addUnique(arr,seen,x,y){
+  if(x<0||x>=COLS||y<0||y>=ROWS)return false;
+  const k=x+','+y;if(seen.has(k))return false;
+  seen.add(k);arr.push({x,y});return true;
+}
+function neighbors(c){
+  return [{x:c.x+1,y:c.y},{x:c.x-1,y:c.y},{x:c.x,y:c.y+1},{x:c.x,y:c.y-1}];
+}
+function nearestFree(start,blocked){
+  const q=[start], seen=new Set([cellKey(start)]);
+  while(q.length){
+    const c=q.shift();
+    if(c.x>=0&&c.x<COLS&&c.y>=0&&c.y<ROWS&&!blocked.has(cellKey(c)))return c;
+    for(const n of neighbors(c)){
+      const k=cellKey(n);if(!seen.has(k)&&n.x>=0&&n.x<COLS&&n.y>=0&&n.y<ROWS){seen.add(k);q.push(n)}
+    }
+  }
+  return start;
+}
+
+function settings(){
+  return {
+    diff:document.getElementById('difficulty').value,
+    fair:document.getElementById('fairway').value,
+    water:document.getElementById('water').value,
+    sand:document.getElementById('sand').value,
+    trees:document.getElementById('trees').value,
+    pressure:document.getElementById('pressure').value,
+    special:document.getElementById('special').value
+  };
+}
+
+function countFor(v){
+  return v==='Lots'?ri(8,13):v==='Some'?ri(3,7):0;
+}
+function treeCount(v){
+  return v==='Lots'?ri(10,18):v==='Normal'?ri(5,11):ri(2,6);
+}
+
+function makeCenterline(tee,hole){
+  const pts=[];
+  const n=ri(9,14);
+  for(let i=0;i<n;i++){
+    const t=i/(n-1);
+    const x=tee.x+(hole.x-tee.x)*t+Math.sin(t*Math.PI*2)*rand(-2.3,2.3);
+    const y=tee.y+(hole.y-tee.y)*t+Math.sin(t*Math.PI*3)*rand(-1.8,1.8);
+    pts.push({x:clamp(Math.round(x),1,COLS-2),y:clamp(Math.round(y),1,ROWS-2)});
+  }
+  return pts;
+}
+
+function buildFairway(tee,hole,center,s){
+  const cells=[],seen=new Set();
+  const add=(x,y)=>{
+    if(x<1||x>COLS-2||y<1||y>ROWS-2)return;
+    if((x===tee.x&&y===tee.y)||(x===hole.x&&y===hole.y))return;
+    const k=x+','+y;if(seen.has(k))return;
+    seen.add(k);cells.push({x,y});
+  };
+  const personality=rand();
+  const type=personality<.18?'dogleg':personality<.36?'strip':personality<.53?'split':personality<.68?'island':'patch';
+  const n=s.fair==='Rare'?ri(4,6):s.fair==='Generous'?ri(7,10):ri(5,8);
+
+  function patch(cx,cy,w,h,shape){
+    for(let y=cy-Math.ceil(h/2);y<=cy+Math.ceil(h/2);y++){
+      for(let x=cx-Math.ceil(w/2);x<=cx+Math.ceil(w/2);x++){
+        let ok=false;
+        if(shape==='island')ok=((x-cx)/(Math.max(1,w/2)))**2+((y-cy)/(Math.max(1,h/2)))**2<=1.1;
+        else if(shape==='strip')ok=Math.abs(y-cy)<=1 && Math.random()<.88;
+        else if(shape==='dogleg')ok=(x<=cx?Math.abs(y-cy)<=1:Math.abs(y-(cy+1))<=1);
+        else ok=Math.random()<.82;
+        if(ok)add(x,y);
+      }
+    }
+  }
+
+  for(let i=0;i<n;i++){
+    const p=center[ri(1,center.length-2)];
+    const gx=clamp(p.x+ri(-2,2),1,COLS-2), gy=clamp(p.y+ri(-2,2),1,ROWS-2);
+    const shape=i===0?type:(rand()<.28?'strip':rand()<.18?'island':'patch');
+    patch(gx,gy,shape==='strip'?ri(2,5):ri(2,4),shape==='strip'?1:ri(1,3),shape);
+  }
+
+  // Guarantee gaps: remove any cell that would bridge two distinct fairway areas.
+  // This keeps green visually fragmented even if adjacent patches were generated.
+  const final=[];
+  for(const c of cells){
+    const adjacent=cells.filter(o=>Math.abs(o.x-c.x)+Math.abs(o.y-c.y)===1).length;
+    if(adjacent<=3 || rand()<.65)final.push(c);
+  }
+  return {cells:final,type};
+}
+
+function buildTrees(tee,hole,center,s,special){
+  const cells=[],seen=new Set();
+  const add=(x,y)=>{
+    if(x<1||x>COLS-2||y<1||y>ROWS-2)return;
+    if((x===tee.x&&y===tee.y)||(x===hole.x&&y===hole.y))return;
+    const k=x+','+y;if(seen.has(k))return;seen.add(k);cells.push({x,y});
+  };
+  function group(cx,cy,type){
+    if(type==='single'){add(cx,cy);return}
+    if(type==='line'){
+      const horiz=rand()<.5,len=ri(3,7);
+      for(let i=0;i<len;i++)add(horiz?cx+i-Math.floor(len/2):cx,horiz?cy:cy+i-Math.floor(len/2));
+      return;
+    }
+    if(type==='block'){
+      const w=ri(2,4),h=ri(2,4);
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++)add(cx+x-Math.floor(w/2),cy+y-Math.floor(h/2));
+      return;
+    }
+    const target=ri(6,14);add(cx,cy);
+    for(let i=0;i<target;i++){
+      const b=cells[Math.max(0,cells.length-ri(1,Math.min(cells.length,6)))];
+      add(b.x+ri(-1,1),b.y+ri(-1,1));
+    }
+  }
+
+  if(special==='Forest Gate'||special==='Forest Tunnel'){
+    const hc=hole;
+    const gap=special==='Forest Gate'?2:1;
+    for(const side of [-1,1]){
+      for(let i=1;i<=6;i++){
+        add(clamp(hc.x+side*(gap+i),1,COLS-2),clamp(hc.y-i+ri(-1,1),1,ROWS-2));
+        if(special==='Forest Tunnel'&&i>=3)add(clamp(hc.x+side*(gap+i),1,COLS-2),clamp(hc.y+i,1,ROWS-2));
+      }
+    }
+  }else{
+    for(let i=0;i<ri(3,6);i++){
+      const p=center[ri(1,center.length-2)];
+      const gx=clamp(p.x+(rand()<.5?-1:1)*ri(2,4),1,COLS-2);
+      const gy=clamp(p.y+ri(-2,2),1,ROWS-2);
+      const r=rand();group(gx,gy,r<.25?'single':r<.52?'line':r<.78?'irregular':'block');
+    }
+  }
+  return cells;
+}
+
+function buildHazard(kind,tee,hole,center,special){
+  const cells=[],seen=new Set();
+  const add=(x,y)=>{
+    if(x<1||x>COLS-2||y<1||y>ROWS-2)return;
+    if((x===tee.x&&y===tee.y)||(x===hole.x&&y===hole.y))return;
+    const k=x+','+y;if(seen.has(k))return;seen.add(k);cells.push({x,y});
+  };
+  const amount=countFor(kind);
+  for(let i=0;i<amount;i++){
+    const p=center[ri(1,center.length-2)];
+    add(clamp(p.x+ri(-2,2),1,COLS-2),clamp(p.y+ri(-2,2),1,ROWS-2));
+  }
+  return cells;
+}
+
+function buildEnclosure(kind,hole){
+  const cells=[],seen=new Set();
+  const add=(x,y)=>{
+    if(x<1||x>COLS-2||y<1||y>ROWS-2)return;
+    const k=x+','+y;if(seen.has(k))return;seen.add(k);cells.push({x,y});
+  };
+  const r=kind==='Island'?2:3;
+  for(let x=hole.x-r;x<=hole.x+r;x++)for(let y=hole.y-r;y<=hole.y+r;y++){
+    const edge=Math.abs(x-hole.x)===r||Math.abs(y-hole.y)===r;
+    if(edge)add(x,y);
+  }
+  if(kind==='Almost Island'){
+    // Deliberately open one side.
+    for(let i=0;i<3;i++)seen.delete((hole.x-r)+','+(hole.y-r+i));
+    return cells.filter(c=>seen.has(cellKey(c)));
+  }
+  return cells;
+}
+
+
+function buildGreen(hole, trees, water, sand){
+  const blocked=new Set();
+  for(const c of trees) blocked.add(cellKey(c));
+  for(const c of water) blocked.add(cellKey(c));
+  for(const c of sand) blocked.add(cellKey(c));
+
+  const candidates=[];
+  // Every green must include the hole's own cell and at least one full
+  // playable square in each direction around it where possible.
+  const dirs=[{x:-1,y:0},{x:1,y:0},{x:0,y:-1},{x:0,y:1}];
+  for(const d of dirs){
+    const c={x:hole.x+d.x,y:hole.y+d.y};
+    if(c.x>=0&&c.x<COLS&&c.y>=0&&c.y<ROWS&&!blocked.has(cellKey(c))) candidates.push(c);
+  }
+
+  const seen=new Set();
+  const green=[];
+  const add=(x,y)=>{
+    if(x<0||x>=COLS||y<0||y>=ROWS)return;
+    const k=x+','+y;
+    if(seen.has(k)||blocked.has(k))return;
+    seen.add(k);green.push({x,y});
+  };
+
+  add(hole.x,hole.y);
+  candidates.forEach(c=>add(c.x,c.y));
+
+  // Small, varied green shapes: compact, L-shaped, short oval-ish,
+  // or irregular — but never large enough to become fairway.
+  const shape=ri(0,4);
+  const target=ri(4,8);
+
+  if(shape===0){
+    for(let r=1;r<=2 && green.length<target;r++){
+      for(let dx=-r;dx<=r;dx++) for(let dy=-r;dy<=r;dy++){
+        if(Math.abs(dx)+Math.abs(dy)<=r+1) add(hole.x+dx,hole.y+dy);
+      }
+    }
+  } else if(shape===1){
+    const arm=choice([[1,0],[-1,0],[0,1],[0,-1]]);
+    for(let i=1;i<=3;i++) add(hole.x+arm.x*i,hole.y+arm.y*i);
+    const side={x:-arm.y,y:arm.x};
+    for(let i=1;i<=2;i++) add(hole.x+side.x*i,hole.y+side.y*i);
+  } else if(shape===2){
+    for(let dx=-2;dx<=2;dx++) for(let dy=-1;dy<=1;dy++){
+      if((dx*dx)/4+(dy*dy)<=1.2) add(hole.x+dx,hole.y+dy);
+    }
+  } else if(shape===3){
+    const dirs2=choice([
+      [{x:-1,y:0},{x:-1,y:-1},{x:0,y:-1}],
+      [{x:1,y:0},{x:1,y:1},{x:0,y:1}],
+      [{x:-1,y:0},{x:-1,y:1},{x:0,y:1}],
+      [{x:1,y:0},{x:1,y:-1},{x:0,y:-1}]
+    ]);
+    dirs2.forEach(d=>add(hole.x+d.x,hole.y+d.y));
+    add(hole.x+dirs2[0].x*2,hole.y+dirs2[0].y*2);
+  } else {
+    for(let i=0;i<10 && green.length<target;i++){
+      const base=green[ri(0,green.length-1)];
+      add(base.x+ri(-1,1),base.y+ri(-1,1));
+    }
+  }
+
+  // Keep the green compact and small.
+  return green.slice(0,Math.max(4,Math.min(8,target)));
+}
+function drawGreen(cells,hole){
+  for(const c of cells){
+    // Green uses the same full-cell language as every other terrain type,
+    // with a subtle visual distinction.
+    rect(c.x,c.y,'#b9dca8','#6e9462',1);
+  }
+  // Flag/hole is drawn last so it remains unmistakable.
+  circleCell(hole.x,hole.y,10,'#263027','#fff',2);
+  text(hole.x,hole.y,'⛳',16,'700');
+}
+
+function drawTrees(cells){
+  for(const c of cells){
+    rect(c.x,c.y,'#fff','#73806f',1);
+    const cx=PAD+c.x*CELL+CELL/2, cy=PAD+c.y*CELL+CELL/2;
+    const s=CELL*.24;
+    const e=document.createElementNS('http://www.w3.org/2000/svg','path');
+    e.setAttribute('d',
+      `M ${cx} ${cy-s*1.75}
+       L ${cx-s*.72} ${cy-s*.15}
+       L ${cx-s*.34} ${cy-s*.15}
+       L ${cx-s*.92} ${cy+s*.65}
+       L ${cx-s*.36} ${cy+s*.65}
+       L ${cx-s*1.02} ${cy+s*1.25}
+       L ${cx+s*1.02} ${cy+s*1.25}
+       L ${cx+s*.36} ${cy+s*.65}
+       L ${cx+s*.92} ${cy+s*.65}
+       L ${cx+s*.34} ${cy-s*.15}
+       L ${cx+s*.72} ${cy-s*.15} Z`);
+    e.setAttribute('fill','#5b805b');
+    e.setAttribute('stroke','#315b3b');
+    e.setAttribute('stroke-width','1.5');
+    e.setAttribute('stroke-linejoin','round');
+    document.getElementById('svg').appendChild(e);
+  }
+}
+function drawHazards(cells,fill,mark){
+  for(const c of cells){
+    rect(c.x,c.y,fill);
+    if(mark)text(c.x,c.y,mark,18,'700');
+  }
+}
+
+function generateHole(profile=null){
+  clearSVG();
+  const s=settings();
+  if(profile){
+    for(const [id,key] of [['difficulty','diff'],['fairway','fair'],['water','water'],['sand','sand'],['trees','trees'],['pressure','pressure'],['special','special']]){
+      if(profile[key])document.getElementById(id).value=profile[key];
+    }
+  }
+
+  const tee={x:ri(1,4),y:ROWS-2};
+  const hole={x:ri(COLS-5,COLS-2),y:ri(1,3)};
+  const center=makeCenterline(tee,hole);
+
+  const requestedSpecial=s.special;
+  const special=requestedSpecial==='Random'
+    ? choice(['None','None','None','None','Island','Almost Island','Forest Gate','Forest Tunnel','Mixed Enclosure'])
+    : requestedSpecial;
+
+  const fair=buildFairway(tee,hole,center,s);
+  fair.cells.forEach(c=>rect(c.x,c.y,'#cfe9bd'));
+
+  let water=buildHazard(s.water,tee,hole,center,s.special);
+  let sand=buildHazard(s.sand,tee,hole,center,s.special);
+  if(special==='Island'||special==='Almost Island'){
+    const ring=buildEnclosure(special,hole);
+    if(rand()<.55){water=water.concat(ring)}else{sand=sand.concat(ring)}
+  }
+  if(special==='Mixed Enclosure'){
+    const ring=buildEnclosure('Almost Island',hole);
+    water=water.concat(ring.slice(0,Math.ceil(ring.length/3)));
+    sand=sand.concat(ring.slice(Math.ceil(ring.length/3),Math.ceil(ring.length*2/3)));
+  }
+
+  drawHazards(water,'#d9edf4',null);
+  drawHazards(sand,'#eee1c6',null);
+
+  const trees=buildTrees(tee,hole,center,s,special);
+  drawTrees(trees);
+
+  const green=buildGreen(hole,trees,water,sand);
+  drawGreen(green,hole);
+
+  // Tee square and hole.
+  rect(tee.x,tee.y,'#fff','#263027',2);
+  text(tee.x,tee.y,'T',18,'700');
+  const par=s.diff==='Easy'?3:s.diff==='Brutal'?5:4;
+  const labels={dogleg:'Dogleg',strip:'Landing Strips',split:'Split Fairway',island:'Fairway Island',patch:'Irregular Patches'};
+  const specialLabel=special!=='None'?` • ${special}`:'';
+  document.getElementById('title').textContent=profile
+    ? `Course ${currentCourseType} • Hole ${currentHole} of ${currentCourseType}`
+    : 'Paper Apps Golf — New Hole';
+  document.getElementById('status').textContent=`Par ${par} • ${labels[fair.type]}${specialLabel}`;
+  document.getElementById('courseSummary').textContent=profile
+    ? 'Designed course progression: early holes introduce the course, middle holes vary the hazards, and the closing holes are tougher and more memorable.'
+    : 'White squares are rough. Pale green squares are fairway (+1); darker outlined green cells are the putting green. Blue cells are water, tan cells are sand, and tree cells show the forest.';
+}
+
+function courseProfile(i,n){
+  const t=i/(n-1||1);
+  const diff=t<.22?'Easy':t<.55?'Medium':t<.83?'Hard':'Brutal';
+  const fair=t<.2?'Generous':t<.7?'Normal':'Rare';
+  const pressure=t<.25?'Low':t<.72?'Medium':'High';
+  const p18=[
+    ['None','None','Some','Few'],['None','Some','None','Normal'],['None','None','Lots','Normal'],
+    ['Forest Gate','None','Some','Lots'],['None','Lots','Some','Normal'],['Almost Island','Lots','None','Few'],
+    ['None','Some','Lots','Lots'],['Forest Tunnel','None','Some','Lots'],['None','Some','Some','Normal'],
+    ['Mixed Enclosure','Some','Lots','Lots'],['None','Lots','None','Normal'],['None','None','Lots','Lots'],
+    ['Forest Gate','Some','None','Lots'],['None','Lots','Some','Normal'],['Almost Island','Lots','Some','Few'],
+    ['None','Some','Lots','Lots'],['Forest Tunnel','None','Some','Lots'],['Island','Lots','Some','Normal']
+  ];
+  const p9=[
+    ['None','None','Some','Few'],['None','Some','None','Normal'],['Forest Gate','None','Some','Lots'],
+    ['None','Lots','Some','Normal'],['Almost Island','Lots','None','Few'],['None','Some','Lots','Lots'],
+    ['Forest Tunnel','None','Some','Lots'],['Mixed Enclosure','Some','Lots','Lots'],['Island','Lots','Some','Normal']
+  ];
+  const p=(n===9?p9:p18)[i%(n===9?p9:p18).length];
+  return {special:p[0],water:p[1],sand:p[2],trees:p[3],diff,fair,pressure};
+}
+function newHole(){
+  currentCourse=[];currentCourseType=0;currentHole=1;generateHole(null);
+}
+function newCourse(n){
+  currentCourse=Array.from({length:n},(_,i)=>courseProfile(i,n));
+  currentCourseType=n;currentHole=1;generateHole(currentCourse[0]);
+}
+function nextHole(){
+  if(!currentCourse.length){newCourse(18);return}
+  currentHole=currentHole%currentCourse.length+1;generateHole(currentCourse[currentHole-1]);
+}
+function previousHole(){
+  if(!currentCourse.length){newCourse(18);return}
+  currentHole=(currentHole-2+currentCourse.length)%currentCourse.length+1;generateHole(currentCourse[currentHole-1]);
+}
+window.addEventListener('error',e=>{
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;inset:0;background:white;color:#222;padding:20px;font:16px system-ui;z-index:99999';
+  d.innerHTML='<h2>Paper Apps Golf error</h2><p>'+String(e.message||e.error||'Unknown error')+'</p>';
+  document.body.appendChild(d);
+});
+newHole();
+</script>
+</body>
+</html>
